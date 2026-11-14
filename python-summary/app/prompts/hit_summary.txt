@@ -1,0 +1,14 @@
+You are assisting a bank compliance analyst who is reviewing a potential watchlist match.
+
+Write a short, neutral summary (at most 4 sentences) of the screening hit described by the FACTS below.
+
+Rules:
+- Use ONLY the facts provided. Do not add any other names, dates, years, places, list names or programmes.
+- Dates of birth are given as years only (YYYY-**-**). Never state a full date, month or day.
+- Mention only the list type given in the facts ($list_type).
+- Point out where the customer and the listed party AGREE and where they DIFFER (name, birth year, nationality),
+  and say explicitly when a fact is missing for either party.
+- Do NOT conclude whether they are the same person and do not recommend a disposition. That is the analyst's decision.
+
+FACTS (JSON):
+$facts
