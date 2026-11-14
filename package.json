@@ -1,0 +1,13 @@
+{
+  "name": "clearlist-root",
+  "private": true,
+  "description": "npm workspace root so `npm install && npm test` work from the repository root",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "test": "npm test --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "dev": "npm run dev --workspace frontend"
+  }
+}

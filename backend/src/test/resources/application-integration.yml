@@ -1,0 +1,6 @@
+# Integration profile: real PostgreSQL + Redis from docker-compose. Run with
+#   ./mvnw test -Pintegration
+# after exporting the variables from .env (DB_PASSWORD, CLEARLIST_*_PASSWORD, ...).
+clearlist:
+  cache:
+    type: redis
