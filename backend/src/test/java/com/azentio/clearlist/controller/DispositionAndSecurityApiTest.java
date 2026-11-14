@@ -5,6 +5,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -163,7 +164,26 @@ class DispositionAndSecurityApiTest {
     @Test
     void wrongPasswordIsRejected() throws Exception {
         mockMvc.perform(get("/api/hits").with(httpBasic("analyst", "wrong")))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().exists("WWW-Authenticate"));
+    }
+
+    @Test
+    void ajaxRequestsGet401WithoutBrowserLoginChallenge() throws Exception {
+        mockMvc.perform(get("/api/me").header("X-Requested-With", "XMLHttpRequest")
+                        .with(httpBasic("analyst", "wrong")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
+    }
+
+    @Test
+    void currentUserEndpointReturnsNameAndRoles() throws Exception {
+        mockMvc.perform(get("/api/me").with(ANALYST))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("analyst"))
+                .andExpect(jsonPath("$.roles[0]").value("ANALYST"));
+        mockMvc.perform(get("/api/me").with(SUPERVISOR))
+                .andExpect(jsonPath("$.roles[0]").value("SUPERVISOR"));
     }
 
     @Test

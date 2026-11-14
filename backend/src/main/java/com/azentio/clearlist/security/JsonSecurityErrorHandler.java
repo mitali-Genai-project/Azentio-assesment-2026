@@ -28,7 +28,11 @@ public class JsonSecurityErrorHandler implements AuthenticationEntryPoint, Acces
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException exception) throws IOException {
-        response.setHeader("WWW-Authenticate", "Basic realm=\"clearlist\"");
+        // Browsers show a native login pop-up for this header; the React UI marks its requests as AJAX and
+        // handles 401 itself, so the challenge is only sent to other (e.g. curl) clients.
+        if (!"XMLHttpRequest".equals(request.getHeader("X-Requested-With"))) {
+            response.setHeader("WWW-Authenticate", "Basic realm=\"clearlist\"");
+        }
         write(response, request, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication is required");
     }
 
