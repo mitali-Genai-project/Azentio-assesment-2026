@@ -31,6 +31,10 @@ issues before I approved the next phase.
    this check found the gaps listed in rows 11–14 below.
 5. **"Yes fix these issues and I need to push this code into my branch feature/core-functionality"**: the
    agent fixed the gaps, re-ran both test suites, then created the commits and pushed the branch.
+6. **"Can you please implement frontend functionality as well additionally using react"** (with the
+   submission rules pasted in): the agent built the stretch-goal React + TypeScript review UI with React
+   Testing Library tests runnable via `npm test` from the repo root. It then ran the backend and UI together
+   on H2 to exercise the real flow, and ran the load test on that setup.
 
 ## Code generated with AI assistance
 
@@ -40,6 +44,8 @@ The large majority of the code and documentation in this repository was generate
   audit, controllers, exception handling, all tests) and the Maven wrapper.
 - **Scripts**: `scripts/generate_watchlist.py` and `scripts/load_test.py`.
 - **Python service**: all of `python-summary/` (service, prompt template, validator, tests).
+- **Frontend**: all of `frontend/` and the root `package.json` workspace, plus the backend's `GET /api/me`
+  endpoint and AJAX-aware 401 handling that the UI needs.
 - **Infrastructure and docs**: `docker-compose.yml`, `.env.example`, `.gitignore`, `README.md`, this file.
 - **Data**: `data/*.csv|json` are output of the generator script, not hand-written.
 
@@ -64,6 +70,8 @@ re-reading its own code before running it.
 | 12 | The Maven project lived only in `backend/`, so the graders' plain `mvn test` at the repo root would have failed with "no POM". | Cross-check against the PDF's "we will run `mvn test`" rule. | Root aggregator `pom.xml`; `mvn test` from the root verified (128 tests pass). |
 | 13 | The agent skipped the optional real LLM provider, but the PDF's "done" list requires the README to show how to switch to one. | Cross-check against the PDF. | Added `OllamaProvider` (standard-library HTTP, no API key) with mocked-HTTP tests and README instructions. |
 | 14 | No unit test directly asserted "the cache key changes when the list version changes"; only indirect version-isolation tests existed. | Cross-check against the PDF. | Added `cacheKeyChangesWhenListVersionChanges`. |
+| 15 | The agent's first two attempts to run the app locally on H2 failed: `-Dspring-boot.run.profiles=test` and `--spring.profiles.active=test` both still connected to PostgreSQL. `useTestClasspath` adds test dependencies (H2) but not `application-test.yml`. | App startup failed with "connection to localhost:5432 refused"; diagnosed from the log. | Configured H2 through the existing environment variables instead; documented as README §8a. |
+| 16 | The agent expected the cache to clearly reduce latency. The measured gain was only ≈ 19 ms at p50. | Load-test numbers. The agent then measured an auth-only request (≈ 82 ms) before attributing the cost to per-request bcrypt. | Reported as measured in README §14 instead of being presented as a cache win; token auth added to next steps. |
 
 A further, minor one: a throwaway `jshell` experiment had broken regex escaping in a shell `sed` command,
 which made some of its measured numbers misleading. Only the subsequent Java unit tests were relied on.
@@ -80,8 +88,10 @@ readable, but the commit timestamps show when they were made, not when each piec
 Docker was not available, so none of these were run:
 - integration tests against real PostgreSQL and Redis;
 - the Spring Boot app started against PostgreSQL;
-- the load test;
+- the load test against Redis;
 - `EXPLAIN` output for the review-queue query.
+
+The app and load test *were* run on H2 with the in-memory cache, and the README labels those numbers as such.
 
 The README marks each of these as not run, and no results are claimed. The evaluation figures are on a
 synthetic dataset generated in this same session, and the matcher was tuned after seeing failures on it

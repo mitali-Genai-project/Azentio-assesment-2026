@@ -13,10 +13,12 @@ workflow. A separate Python service writes fact-checked, analyst-facing summarie
 | `mvn test` from the repo root: 128 tests, H2 + in-memory cache, offline | ✅ passing |
 | Matching evaluation (recall / false-positive rate) | ✅ recall 1.000, FPR 0.000 (see [§13](#13-evaluation-results)) |
 | `pytest` from the repo root: 20 tests, offline | ✅ passing |
+| `npm install && npm test` from the repo root: 18 frontend tests (Vitest + React Testing Library) | ✅ passing |
 | Python service started with uvicorn and called | ✅ |
+| Spring Boot app + React dev server run together on **H2 + in-memory cache** ([§8a](#8a-local-demo-without-docker-h2)); upload, screen, cache hit, escalate, confirm and audit exercised through the UI's proxy | ✅ |
+| Load test on **H2 + in-memory cache** ([§14](#14-load-test-results)) | ✅ measured |
 | Integration tests against real PostgreSQL + Redis (`-Pintegration`) | ⚠️ not run |
-| Spring Boot app started against PostgreSQL | ⚠️ not run |
-| Load test | ⚠️ not run |
+| Spring Boot app started against PostgreSQL; load test against Redis | ⚠️ not run |
 | `EXPLAIN` of the review-queue query on PostgreSQL | ⚠️ not captured |
 
 ---
@@ -28,6 +30,7 @@ workflow. A separate Python service writes fact-checked, analyst-facing summarie
 | 1 | Synthetic watchlist + labelled evaluation data, versioned watchlist upload (CSV/JSON), name normalisation, fuzzy matching, screening API, review queue, error handling, Flyway schema | Complete, tested |
 | 2 | Redis screening cache (version-isolated), Spring Security (ANALYST / SUPERVISOR), hit disposition state machine, append-only audit trail, load-test script | Complete and tested offline; Redis/PostgreSQL paths not run |
 | 3 | FastAPI hit-summary service with `LLMProvider` interface, deterministic `FakeProvider` (default), optional local `OllamaProvider`, DOB masking, output validation + fallback | Complete, tested (Ollama tested with a mocked HTTP call, not a live server) |
+| Stretch | React + TypeScript review UI: sign-in, review queue by status, disposition buttons by role, reason prompt, audit history, new-screening form | Complete, tested with React Testing Library; run against the live API on H2 |
 
 ## 2. Architecture
 
@@ -47,6 +50,19 @@ A **modular monolith** (Spring Boot) with clear package boundaries, plus an inde
 | `exception` | Typed business exceptions + one `@RestControllerAdvice` producing a single error shape |
 | `config` | Typed configuration properties, cache selection, `Clock` |
 
+**Frontend** (`frontend/`, React 18 + TypeScript + Vite):
+
+| Module | Responsibility |
+|---|---|
+| `api/client.ts` | Typed `fetch` client. Holds HTTP Basic credentials **in memory only** (never `localStorage`) and maps error bodies to `ApiError`. |
+| `policy.ts` | Mirrors the backend transition rules to decide which buttons to show. The server still re-checks every request (403/409). |
+| `components/` | `LoginForm` (checks credentials via `GET /api/me`), `ReviewQueue` (status tabs, paging, role-based actions), `DispositionForm` (mandatory reason), `AuditTrail`, `ScreeningForm` |
+
+The Vite dev server proxies `/api` to Spring Boot, so the browser talks to one origin and no CORS setup is
+needed. The client sends `X-Requested-With: XMLHttpRequest`, and for such requests the backend omits the
+`WWW-Authenticate` header on 401. That keeps a wrong password inside the app's own error message instead of
+the browser's native login pop-up.
+
 **Screening flow**
 
 1. Normalise the name (case, diacritics, punctuation, honorifics, transliteration folding).
@@ -60,6 +76,7 @@ A **modular monolith** (Spring Boot) with clear package boundaries, plus an inde
 ```mermaid
 flowchart TB
     client["Client / onboarding service"] -->|"REST + HTTP Basic"| api
+    ui["React review UI<br/>(Vite dev proxy)"] -->|"/api + HTTP Basic"| api
 
     subgraph api["Spring Boot – Clearlist API"]
         direction TB
@@ -94,13 +111,15 @@ flowchart TB
 | Matching | Apache Commons Text (Jaro-Winkler); Apache Commons CSV for uploads |
 | Tests | JUnit 5, Mockito, Spring MockMvc, AssertJ |
 | Python | Python 3.12 (3.10+ required), FastAPI 0.115, Pydantic 2.9, pytest 8.3 |
+| Frontend | React 18.3, TypeScript 5.6 (strict), Vite 5.4, Vitest 2.1, React Testing Library 16; npm workspace at the repo root |
 | Infra | Docker Compose: PostgreSQL + Redis |
 
 ## 5. Prerequisites
 
 - JDK 17+ (`JAVA_HOME` set) and Maven 3.9+ (`mvn`), or the wrapper `backend/mvnw` instead of Maven.
 - Python 3.10+.
-- Docker + Docker Compose for PostgreSQL/Redis (not needed for unit tests).
+- Node.js 18+ and npm (frontend; developed with Node 22).
+- Docker + Docker Compose for PostgreSQL/Redis (not needed for unit tests or the local H2 demo).
 
 ## 6. Environment setup
 
@@ -150,6 +169,29 @@ cd backend
 
 > **Windows note:** `mvnw.cmd` failed in the development environment because the user-profile path
 > contains a space (`C:\Users\<First Last>`). Use `./mvnw` from Git Bash, or a locally installed `mvn`.
+
+### 8a. Local demo without Docker (H2)
+
+For a quick look without PostgreSQL/Redis, run the same app against in-memory H2 (in PostgreSQL mode, with
+the same Flyway migrations) and the in-memory cache. Data is lost on restart. Use throwaway passwords:
+
+```bash
+cd backend
+export DB_URL="jdbc:h2:mem:demo;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1" \
+       DB_USERNAME=sa DB_PASSWORD="" CACHE_TYPE=memory \
+       CLEARLIST_ANALYST_PASSWORD=<choose> CLEARLIST_SUPERVISOR_PASSWORD=<choose>
+./mvnw spring-boot:run -Dspring-boot.run.useTestClasspath=true   # test classpath provides the H2 driver
+```
+
+### 8b. Start the React review UI
+
+```bash
+npm install          # from the repo root (npm workspace)
+npm run dev          # http://localhost:5173 ; proxies /api to http://localhost:8080 (override: CLEARLIST_API_URL)
+```
+
+Sign in as `analyst` or `supervisor`. To get hits into the queue, upload `data/watchlist.csv` as the
+supervisor (curl below), then screen a name such as `Alexander Petroff` in the **New screening** form.
 
 ## 9. Start the Python summary service
 
@@ -247,6 +289,8 @@ From the repository root:
 mvn test        # 128 tests: H2 (PostgreSQL mode) + in-memory cache, no Docker (or: cd backend && ./mvnw test)
 pip install -r python-summary/requirements.txt
 pytest          # 20 tests
+npm install
+npm test        # 18 frontend tests (Vitest + React Testing Library, jsdom, no server needed)
 ```
 
 Regenerate the synthetic data (deterministic, seed 42):
@@ -267,6 +311,8 @@ python scripts/generate_watchlist.py      # -> data/watchlist.csv, data/watchlis
 | `HitTransitionPolicyTest` | Full role × status matrix (200/403/409) |
 | `ScreeningServiceCacheTest`, `InMemoryScreeningCacheTest`, `RedisScreeningCacheTest` | Cache key changes with the list version; cache hits still persist a screening; a name screened before and after an upload is re-evaluated; TTL; fail-open on Redis errors; no plain names in keys |
 | `AuditAppendOnlyTest` | Audit records cannot be deleted or modified through the application |
+| `ReviewQueue.test.tsx` (frontend) | Queue rendering, **analyst vs supervisor buttons by hit status**, reason required (blank/whitespace disabled), disposition sent and queue reloaded, server error shown, status tabs, audit history |
+| `LoginForm.test.tsx`, `client.test.ts`, `policy.test.ts` (frontend) | Credentials verified via `/api/me`, wrong password message, auth + AJAX headers, error-body mapping, the role/status matrix |
 
 ## 12. Integration tests (PostgreSQL + Redis) ⚠️ not run
 
@@ -302,25 +348,38 @@ The first evaluation run scored recall 1.000 but **FPR 0.360**. The matcher was 
 The dataset was not changed to suit the matcher, but this is still tuning on the evaluation set, not a held-out
 test. Expect lower figures on real list data.
 
-## 14. Load-test results ⚠️ not run
+## 14. Load-test results
 
-`scripts/load_test.py` (standard library only) sends 1,000 screening requests. About 50% reuse a pool of
-20 names; the rest are unique (495 distinct names in total, so the maximum possible cache-hit ratio is ≈ 0.50).
-It reports p50/p95 latency and the cache-hit ratio from each response's `cacheHit` flag.
+`scripts/load_test.py` (standard library only) sends 1,000 screening requests with 8 concurrent workers.
+About 50% reuse a pool of 20 names; the rest are unique (495 distinct names in total, so the maximum possible
+cache-hit ratio is ≈ 0.50). It reports client-side p50/p95 latency and the cache-hit ratio from each response's
+`cacheHit` flag.
 
 ```bash
-# start the API with CACHE_TYPE=redis, upload data/watchlist.csv, then:
-python scripts/load_test.py --label cache-enabled
-# restart the API with CACHE_TYPE=none:
-python scripts/load_test.py --label cache-disabled
+# API running (see §8 / §8a) with data/watchlist.csv uploaded; analyst password exported
+CACHE_TYPE=memory (or redis)  ->  python scripts/load_test.py --label cache-enabled
+CACHE_TYPE=none               ->  python scripts/load_test.py --label cache-disabled
 ```
 
-No results are recorded because PostgreSQL/Redis were not available. Fill in after running:
+**Measured on the local H2 setup (§8a) with the in-memory cache, not PostgreSQL + Redis.** One laptop ran the
+API, H2 and the load generator, so treat these as relative numbers only:
 
-| Run | p50 (ms) | p95 (ms) | Cache-hit ratio |
-|---|---|---|---|
-| cache-enabled | – | – | – |
-| cache-disabled | – | – | – |
+| Run | p50 (ms) | p95 (ms) | Cache-hit ratio | Throughput |
+|---|---|---|---|---|
+| cache enabled (`CACHE_TYPE=memory`) | 185.7 | 237.5 | 0.504 | 45.6 req/s |
+| cache disabled (`CACHE_TYPE=none`) | 204.7 | 247.3 | 0.000 | 39.0 req/s |
+
+**What this shows:**
+- The cache hit about half the requests, as designed.
+- It removed only about 19 ms at p50, because matching is not the bottleneck.
+- A request that only authenticates (`GET /api/me`) took **≈ 82 ms** on its own (mean of 6 sequential calls).
+  HTTP Basic re-runs a bcrypt password check on every request, and under 8 concurrent workers those checks also
+  compete for CPU.
+- The rest of each request is the per-request persistence of screening and hit rows (required: every screening
+  is stored).
+
+A token issued once at login would remove the per-request bcrypt cost (see §17). The PostgreSQL + Redis numbers
+are still to be measured.
 
 ## 15. Review-queue index ⚠️ EXPLAIN not captured
 
@@ -383,6 +442,15 @@ query. It has not been run, so no plan output is shown here.
   conclusions), so unusual wording may slip through.
 - **Limitation:** the Ollama provider has only been tested with a mocked HTTP call.
 
+**Frontend**
+- The UI only *hides* actions a role may not take. Authorisation is enforced by the backend, and a stale or
+  tampered UI simply receives 403/409, which is displayed.
+- Credentials stay in memory for the browser tab, so a page refresh signs the user out (deliberate: nothing
+  sensitive is persisted in the browser).
+- **Limitation:** there is no watchlist-upload screen (supervisors upload via the API) and no hit-summary panel yet.
+- **Limitation:** the production build (`npm run build`) is not served by Spring Boot; a deployment would put the
+  static files and `/api` behind one reverse proxy.
+
 **Integration and build**
 - **Limitation:** the Java API does not call the summary service yet.
 - **Limitation:** `mvnw.cmd` fails when the user path contains a space (see §8); plain `mvn` from the root works.
@@ -390,10 +458,13 @@ query. It has not been run, so no plan output is shown here.
 ## 17. Next steps
 
 1. Run the integration tests, the load test and `EXPLAIN` on PostgreSQL + Redis, and record the real results above.
-2. Evaluate on a larger, independently labelled dataset (ideally public sanctions-list variants) and tune the
+2. Replace per-request HTTP Basic with a token issued at login (OIDC or a short-lived JWT): measured ≈ 82 ms of
+   bcrypt per request is currently the largest latency cost.
+3. Frontend: hit-detail view with the Python summary, supervisor upload screen, and a Playwright end-to-end test.
+4. Evaluate on a larger, independently labelled dataset (ideally public sanctions-list variants) and tune the
    thresholds per list type.
-3. Optional DOB/nationality corroboration that only raises or annotates scores, never suppresses a hit.
-4. Candidate blocking (phonetic or n-gram keys) so matching does not scan every entry as lists grow.
-5. Run the Ollama provider against a live model, and have the Java hit-detail endpoint call the summary service
+5. Optional DOB/nationality corroboration that only raises or annotates scores, never suppresses a hit.
+6. Candidate blocking (phonetic or n-gram keys) so matching does not scan every entry as lists grow.
+7. Run the Ollama provider against a live model, and have the Java hit-detail endpoint call the summary service
    with a timeout and graceful fallback.
-6. OIDC authentication, a database-level REVOKE on the audit table, and metrics (cache-hit ratio, match latency).
+8. A database-level REVOKE on the audit table, and metrics (cache-hit ratio, match latency).
