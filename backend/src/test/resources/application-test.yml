@@ -1,0 +1,15 @@
+# Offline test profile: in-memory H2 in PostgreSQL mode (same Flyway migrations as production),
+# in-memory screening cache, and throwaway test-only credentials.
+spring:
+  datasource:
+    url: jdbc:h2:mem:clearlist;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+
+clearlist:
+  cache:
+    type: memory
+    ttl: PT10M
+  security:
+    analyst-password: analyst-test-only
+    supervisor-password: supervisor-test-only
